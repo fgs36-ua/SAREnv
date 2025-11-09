@@ -330,6 +330,10 @@ evaluator = sarenv.ComparativeEvaluator()
 evaluator.path_generators['custom'] = custom_search_algorithm
 ```
 
+## 📃 Publications
+
+* Grøntved, K. A. R., Jarabo-Peñas, A., Reid, S., Rolland, E. G. A., Watson, M., Richards, A., Bullock, S., & Christensen, A. L. (2025). SAREnv: An Open-Source Dataset and Benchmark Tool for Informed Wilderness Search and Rescue Using UAVs. Drones, 9(9), 628. https://doi.org/10.3390/drones9090628
+
 ## 📝 Citation
 
 If you use SAREnv in your research, please cite:
