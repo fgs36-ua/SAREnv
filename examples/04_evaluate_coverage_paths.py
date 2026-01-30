@@ -12,7 +12,7 @@ log = sarenv.get_logger()
 
 if __name__ == "__main__":
     log.info("--- Initializing the Search and Rescue Toolkit ---")
-    data_dir = "sarenv_dataset/19"  # Path to the dataset directory
+    data_dir = "sarenv_dataset"  # Path to the dataset directory
 
     # 1. Initialize the evaluator
     evaluator = ComparativeEvaluator(

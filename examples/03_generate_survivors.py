@@ -16,7 +16,7 @@ log = get_logger()
 if __name__ == "__main__":
     log.info("--- Starting lost_person Location Generation Example ---")
 
-    dataset_dir = "sarenv_dataset/16"
+    dataset_dir = "sarenv_dataset"
     size_to_load = "xlarge"
     num_locations = 100
 
