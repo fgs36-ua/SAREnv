@@ -12,7 +12,7 @@ log = sarenv.get_logger()
 
 if __name__ == "__main__":
     log.info("--- Initializing the Search and Rescue Toolkit ---")
-    data_dir = "sarenv_dataset"  # Path to the dataset directory
+    data_dir = "maigmo_dataset"  # Path to the dataset directory
 
     # 1. Initialize the evaluator
     evaluator = ComparativeEvaluator(
@@ -20,7 +20,7 @@ if __name__ == "__main__":
         evaluation_sizes=[ "medium"],
         num_drones=3,
         num_lost_persons=100,
-        budget=350000,
+        budget=1000000,  # 1000 km total para cubrir el área de Maigmó
     )
 
     # 2. Run the evaluations

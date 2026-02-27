@@ -455,7 +455,7 @@ if __name__ == "__main__":
     log.info("=== Comparative Coverage Video Generation ===")
     
     # Configuration
-    data_dir = "sarenv_dataset/19"
+    data_dir = "maigmo_dataset"
     output_dir = Path("coverage_videos")
     # Distance in meters between metric calculations (determines video granularity and performance)
     # Lower values = higher video quality but longer computation time
@@ -469,7 +469,7 @@ if __name__ == "__main__":
             evaluation_sizes=["medium"],
             num_drones=3,
             num_lost_persons=100,
-            budget=400000,
+            budget=1000000,
         )
         
         # Create output directory

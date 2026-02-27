@@ -14,7 +14,7 @@ def run_loading_example():
     """
     log.info("--- Starting Single Dataset Loading and Visualization Example ---")
 
-    dataset_dir = "sarenv_dataset"
+    dataset_dir = "maigmo_dataset"
     size_to_load = "xlarge"
 
     try:
