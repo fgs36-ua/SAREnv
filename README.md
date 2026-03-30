@@ -6,6 +6,8 @@
 
 SAREnv is an open-access dataset and evaluation framework designed to support research in UAV-based search and rescue (SAR) algorithms. This toolkit addresses the critical need for standardized datasets and benchmarks in wilderness SAR operations, enabling systematic evaluation and comparison of algorithmic approaches including coverage path planning, probabilistic search, and information-theoretic exploration.
 
+If you have issues cloning/downloading the repository with GitHub LFS (Large File Storage), the full repo with large files included can be found here: https://nextcloud.sdu.dk/index.php/s/pap6MJao5iXHWfw
+
 ## 🎯 Project Goals
 
 Unmanned Aerial Vehicles (UAVs) play an increasingly vital role in wilderness search and rescue operations by enhancing situational awareness and extending the reach of human teams. However, the absence of standardized datasets and benchmarks has hindered systematic evaluation and comparison of UAV-based SAR algorithms. SAREnv bridges this gap by providing:
