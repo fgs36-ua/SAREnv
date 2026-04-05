@@ -14,6 +14,7 @@ Estructura:
     communication.py  -> Protocolo gossip epidémico
     simulator.py      -> Motor principal del bucle de simulación
     metrics.py        -> Adaptador a PathEvaluator + métricas propias del enjambre
+    terrain.py        -> Mapas de terreno: detección y transitabilidad
 """
 
 from .config import SwarmConfig, AgentConfig, DroneConfig, RobotDogConfig
@@ -23,6 +24,12 @@ from .environment import SwarmEnvironment
 from .knowledge import LocalKnowledgeMap, MapUpdate
 from .communication import CommunicationProtocol
 from .metrics import SwarmMetrics
+from .terrain import (
+    DETECTION_MODIFIERS,
+    TRAVERSABILITY_COSTS,
+    build_detection_modifier_map,
+    build_traversability_map,
+)
 
 __all__ = [
     "SwarmConfig",
@@ -38,4 +45,8 @@ __all__ = [
     "MapUpdate",
     "CommunicationProtocol",
     "SwarmMetrics",
+    "DETECTION_MODIFIERS",
+    "TRAVERSABILITY_COSTS",
+    "build_detection_modifier_map",
+    "build_traversability_map",
 ]

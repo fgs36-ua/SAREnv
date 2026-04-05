@@ -143,15 +143,19 @@ class SwarmSimulator:
             if not agent.active:
                 continue
             visible = agent._get_visible_cells()
-            agent.knowledge.record_observation(
-                visible, agent.id, self.timestep
-            )
-            # Emitir alerta si vemos zona de alta probabilidad
+            # Registrar cada celda con su calidad de detección específica
+            # según terreno (Fase 2: _detection_quality_at por agente)
             for cell in visible:
+                quality = agent._detection_quality_at(cell[0], cell[1])
+                agent.knowledge.record_observation(
+                    {cell}, agent.id, self.timestep,
+                    detection_quality=quality,
+                )
+                # Emitir alerta si vemos zona de alta probabilidad
                 prob = self.env.probability_map[cell[0], cell[1]]
                 if prob > self.config.alert_probability_threshold:
                     agent.knowledge.record_alert(
-                        cell, prob, agent.id, self.timestep
+                        cell, prob * quality, agent.id, self.timestep,
                     )
 
         # 5. COMUNICACIÓN (gossip entre pares en rango radio)

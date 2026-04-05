@@ -2,10 +2,11 @@
 """
 Wrapper del grid sobre SARDatasetItem para el simulador de enjambre.
 
-Expone el mapa de probabilidad y funciones de conversión de coordenadas
-mundo <-> grid que necesitan los agentes. En Fase 1 el terreno es uniforme
-(mismo coste de movimiento en todas las celdas). En Fase 2 se añadirán
-detection_modifier_map y traversability_map para terreno heterogéneo.
+Expone el mapa de probabilidad, mapas de terreno (detección y transitabilidad)
+y funciones de conversión de coordenadas mundo <-> grid.
+
+Fase 1: terreno uniforme (mismo coste en todas las celdas).
+Fase 2: detection_modifier_map y traversability_map por tipo de agente.
 """
 from __future__ import annotations
 
@@ -13,6 +14,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+from .terrain import (
+    _rasterize_features,
+    build_detection_modifier_map,
+    build_traversability_map,
+)
 
 if TYPE_CHECKING:
     from sarenv.core.loading import SARDatasetItem
@@ -58,6 +65,38 @@ class SwarmEnvironment:
         # Centro del entorno en coordenadas mundo (para despliegue inicial)
         self.center_x: float = (minx + maxx) / 2.0
         self.center_y: float = (miny + maxy) / 2.0
+
+        # -- Mapas de terreno (Fase 2) --
+        # Rasterizar features vectoriales a grid de tipo de terreno
+        self.terrain_grid: np.ndarray = _rasterize_features(
+            dataset_item.features, rows, cols, minx, miny, dx, dy,
+        )
+
+        # Mapas de modificadores por tipo de agente (cacheados en dict)
+        self._detection_modifier: dict[str, np.ndarray] = {}
+        self._traversability: dict[str, np.ndarray] = {}
+
+    def get_detection_modifier(self, agent_type: str) -> np.ndarray:
+        """Grid float32 de modificadores de detección para el tipo de agente.
+
+        Se cachea tras la primera llamada.
+        """
+        if agent_type not in self._detection_modifier:
+            self._detection_modifier[agent_type] = build_detection_modifier_map(
+                self.terrain_grid, agent_type,
+            )
+        return self._detection_modifier[agent_type]
+
+    def get_traversability(self, agent_type: str) -> np.ndarray:
+        """Grid float32 de costes de transitabilidad para el tipo de agente.
+
+        Se cachea tras la primera llamada.
+        """
+        if agent_type not in self._traversability:
+            self._traversability[agent_type] = build_traversability_map(
+                self.terrain_grid, agent_type,
+            )
+        return self._traversability[agent_type]
 
     # -- Conversión de coordenadas --
 
@@ -127,28 +166,30 @@ class SwarmEnvironment:
     ]
 
     def get_reachable_neighbors(
-        self, row: int, col: int, _agent_type: str = "drone"
+        self, row: int, col: int, agent_type: str = "drone"
     ) -> list[tuple[int, int]]:
         """Vecinos alcanzables desde (row, col) en un tick.
 
-        Fase 1: todos los 8 vecinos si están dentro del mapa.
-        Fase 2: usará traversability_map según tipo de agente.
+        Excluye celdas intransitables (coste infinito) para el tipo de agente.
         """
+        trav = self.get_traversability(agent_type)
         neighbors: list[tuple[int, int]] = []
         for dr, dc in self.NEIGHBOR_OFFSETS:
             nr, nc = row + dr, col + dc
-            if self.in_bounds(nr, nc):
+            if self.in_bounds(nr, nc) and np.isfinite(trav[nr, nc]):
                 neighbors.append((nr, nc))
         return neighbors
 
     def movement_cost(
-        self, from_rc: tuple[int, int], to_rc: tuple[int, int], _agent_type: str = "drone"
+        self, from_rc: tuple[int, int], to_rc: tuple[int, int], agent_type: str = "drone"
     ) -> float:
         """Coste en metros de moverse entre dos celdas adyacentes.
 
-        Fase 1: distancia euclídea pura (terreno uniforme).
-        Fase 2: multiplicará por coste del terreno.
+        Distancia euclídea multiplicada por el coste de transitabilidad
+        de la celda destino para el tipo de agente.
         """
         dr = to_rc[0] - from_rc[0]
         dc = to_rc[1] - from_rc[1]
-        return np.sqrt((dr * self.grid.dy) ** 2 + (dc * self.grid.dx) ** 2)
+        base_dist = np.sqrt((dr * self.grid.dy) ** 2 + (dc * self.grid.dx) ** 2)
+        trav = self.get_traversability(agent_type)
+        return base_dist * trav[to_rc[0], to_rc[1]]

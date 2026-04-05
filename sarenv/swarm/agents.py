@@ -206,6 +206,14 @@ class BaseSwarmAgent:
         idx = self._rng.integers(len(reachable))
         return reachable[idx]
 
+    def _detection_quality_at(self, row: int, col: int) -> float:
+        """Calidad de detección base (sin modificar por terreno).
+
+        Las subclases (DroneAgent, RobotDogAgent) sobreescriben este método
+        para devolver la calidad ajustada al tipo de terreno.
+        """
+        return 1.0
+
     # -- Conversión a LineString (compatibilidad con PathEvaluator) --
 
     def get_path_linestring(self):
@@ -222,7 +230,11 @@ class BaseSwarmAgent:
 
 
 class DroneAgent(BaseSwarmAgent):
-    """Dron aéreo -- ve desde arriba, se mueve uniformemente sobre todo el terreno."""
+    """Dron aéreo -- ve desde arriba con penalización por dosel en zonas boscosas.
+
+    Movimiento uniforme (vuela sobre todo el terreno sin restricciones).
+    Detección modulada por terrain detection_modifier: en bosque ve peor.
+    """
 
     agent_type = "drone"
 
@@ -233,12 +245,29 @@ class DroneAgent(BaseSwarmAgent):
         # fallback genérico
         return 80.0 * np.tan(np.radians(45.0 / 2))
 
+    def _get_visible_cells(self) -> set[tuple[int, int]]:
+        """Celdas visibles con calidad de detección modulada por terreno.
+
+        Filtra celdas cuyo modificador de detección sea < 0.05 (prácticamente
+        invisible) para no desperdiciar registro de observación.
+        """
+        all_cells = self.env.get_visible_cells(
+            self.position[0], self.position[1], self._detection_radius,
+        )
+        det_mod = self.env.get_detection_modifier(self.agent_type)
+        return {c for c in all_cells if det_mod[c[0], c[1]] >= 0.05}
+
+    def _detection_quality_at(self, row: int, col: int) -> float:
+        """Calidad de detección [0, 1] en una celda según el terreno."""
+        return float(self.env.get_detection_modifier(self.agent_type)[row, col])
+
 
 class RobotDogAgent(BaseSwarmAgent):
-    """Robot terrestre -- en Fase 1 se comporta igual que un dron.
+    """Robot terrestre -- detección en suelo con bonificación en bosque.
 
-    En Fase 2 sobreescribirá _get_visible_cells, _get_reachable_neighbors
-    y _movement_cost para tener en cuenta el tipo de terreno.
+    No puede cruzar agua (traversability infinita) y se mueve más lento
+    en terrenos difíciles como roca o vegetación densa.
+    Detecta mejor en bosque que el dron (sensores terrestres).
     """
 
     agent_type = "robot_dog"
@@ -248,3 +277,18 @@ class RobotDogAgent(BaseSwarmAgent):
         if isinstance(self.config, RobotDogConfig):
             return self.config.detection_radius
         return 20.0
+
+    def _get_visible_cells(self) -> set[tuple[int, int]]:
+        """Celdas visibles filtradas por calidad de detección terrestre.
+
+        Filtra celdas donde el perro no puede detectar nada (agua=0).
+        """
+        all_cells = self.env.get_visible_cells(
+            self.position[0], self.position[1], self._detection_radius,
+        )
+        det_mod = self.env.get_detection_modifier(self.agent_type)
+        return {c for c in all_cells if det_mod[c[0], c[1]] >= 0.05}
+
+    def _detection_quality_at(self, row: int, col: int) -> float:
+        """Calidad de detección [0, 1] en una celda según el terreno."""
+        return float(self.env.get_detection_modifier(self.agent_type)[row, col])
