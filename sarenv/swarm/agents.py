@@ -67,6 +67,9 @@ class BaseSwarmAgent:
         self.budget_remaining: float = config.budget
         self.path: list[tuple[int, int]] = [start_position]
         self.active: bool = True  # False cuando se agota budget o vuelve a base
+        # Acumulador de celdas observadas a lo largo de TODA la simulación
+        # (inmune a evaporación, para métricas fiables)
+        self.cells_ever_explored: set[tuple[int, int]] = set()
 
         self._rng = rng or np.random.default_rng()
 
@@ -166,10 +169,10 @@ class BaseSwarmAgent:
                 best_score = score
                 best_cell = cell
 
-        if best_cell is not None and best_score > 0:
+        if best_cell is not None:
             return best_cell
 
-        # Fallback -- paseo aleatorio
+        # Fallback -- paseo aleatorio (solo si no hay vecinos alcanzables)
         return self._random_walk(reachable)
 
     # -- Ejecución --

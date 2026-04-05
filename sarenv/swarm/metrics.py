@@ -75,25 +75,25 @@ class SwarmMetrics:
         env = self.sim.env
         total_cells = env.grid.rows * env.grid.cols
 
-        # Unión de celdas exploradas entre todos los agentes
-        explored_union = np.zeros((env.grid.rows, env.grid.cols), dtype=np.float32)
+        # Usar cells_ever_explored (acumulativo, inmune a evaporación)
+        # en vez del exploration_map que decae cada tick.
         per_agent_explored: dict[str, int] = {}
+        all_explored: set[tuple[int, int]] = set()
 
         for agent in self.sim.agents:
-            mask = agent.knowledge.exploration_map > 0.01
-            per_agent_explored[agent.id] = int(mask.sum())
-            explored_union = np.maximum(explored_union, agent.knowledge.exploration_map)
+            per_agent_explored[agent.id] = len(agent.cells_ever_explored)
+            all_explored.update(agent.cells_ever_explored)
 
-        total_explored = int((explored_union > 0.01).sum())
+        total_explored = len(all_explored)
 
-        # Suma individual (antes de deduplicar) para calcular solapamiento
+        # Solapamiento: celdas exploradas por más de un agente
         sum_individual = sum(per_agent_explored.values())
         overlap = (sum_individual - total_explored) if sum_individual > 0 else 0
 
-        # Masa de probabilidad cubierta
-        prob_covered = float(
-            np.sum(env.probability_map[explored_union > 0.01])
-        )
+        # Masa de probabilidad cubierta (sobre el heatmap original, sin normalizar)
+        prob_covered = 0.0
+        for r, c in all_explored:
+            prob_covered += float(env.probability_map[r, c])
         prob_total = float(np.sum(env.probability_map))
 
         return {

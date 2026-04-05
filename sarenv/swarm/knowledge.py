@@ -42,7 +42,15 @@ class LocalKnowledgeMap:
 
     def __init__(self, probability_map: np.ndarray) -> None:
         # Probabilidad de referencia (se copia, cada agente tiene la suya)
-        self.probability_map = probability_map.copy().astype(np.float32)
+        # Normalizamos a [0, 1] para que prob * novelty compita con repulsión
+        # en la función de score.  Los valores raw son ~1e-5 (distribución sobre
+        # todo el grid) y la repulsión es ~0.01, así que sin normalizar los
+        # agentes caen siempre a random walk.
+        raw = probability_map.copy().astype(np.float32)
+        pmax = raw.max()
+        if pmax > 0:
+            raw /= pmax
+        self.probability_map = raw
 
         # Feromona de exploración: 0.0 = sin explorar, 1.0 = explorado al 100%
         self.exploration_map = np.zeros_like(self.probability_map, dtype=np.float32)

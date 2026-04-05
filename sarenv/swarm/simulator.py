@@ -143,6 +143,8 @@ class SwarmSimulator:
             if not agent.active:
                 continue
             visible = agent._get_visible_cells()
+            # Acumular celdas observadas (inmune a evaporación, para métricas)
+            agent.cells_ever_explored.update(visible)
             # Registrar cada celda con su calidad de detección específica
             # según terreno (Fase 2: _detection_quality_at por agente)
             for cell in visible:
