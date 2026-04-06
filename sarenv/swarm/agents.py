@@ -74,6 +74,11 @@ class BaseSwarmAgent:
 
         self._rng = rng or np.random.default_rng()
 
+        # Seguimiento de transitabilidad media experimentada (para estimar
+        # coste real de vuelta a base en terrenos difíciles).
+        self._trav_sum: float = 0.0
+        self._trav_count: int = 0
+
         # Frontier persistente: evita re-calcular cada tick y oscilar
         self._frontier_target: tuple[int, int] | None = None
         self._frontier_ttl: int = 0  # ticks restantes de compromiso
@@ -138,7 +143,12 @@ class BaseSwarmAgent:
 
         # Prioridad 1 -- conservar budget para volver a base
         dist_to_base = self._grid_distance(self.position, self.base_position)
-        if perception.budget_remaining < dist_to_base * self.config.return_safety_factor:
+        # Estimación del coste real de vuelta: distancia × transitabilidad
+        # media experimentada.  Para drones (trav ≈ 1.0) es casi igual que
+        # antes; para perros en terreno difícil (trav > 1) reserva mucho más.
+        avg_trav = self._trav_sum / self._trav_count if self._trav_count > 0 else 1.0
+        estimated_return = dist_to_base * max(avg_trav, 1.0) * self.config.return_safety_factor
+        if perception.budget_remaining < estimated_return:
             return self._step_toward(self.base_position)
 
         # Prioridad 2 -- investigar la alerta más fuerte cercana
@@ -211,6 +221,10 @@ class BaseSwarmAgent:
         if cost > self.budget_remaining:
             self.active = False
             return
+        # Actualizar media de transitabilidad experimentada
+        trav = self.env.get_traversability(self.agent_type)
+        self._trav_sum += trav[target[0], target[1]]
+        self._trav_count += 1
         self.position = target
         self.budget_remaining -= cost
         self.path.append(target)

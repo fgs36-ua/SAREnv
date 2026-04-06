@@ -66,11 +66,20 @@ class SwarmSimulator:
 
         total = self.config.total_agents
         for i in range(total):
-            # Despliegue en anillo alrededor del centro
+            # Despliegue en anillo alrededor del centro.
+            # Radio escala con √N para que la densidad local no crezca
+            # al añadir agentes (evita congestión inicial).
             if total > 1:
                 angle = 2 * np.pi * i / total
-                offset_r = min(2, self.env.grid.rows // 20)
-                offset_c = min(2, self.env.grid.cols // 20)
+                base_ring = min(2, self.env.grid.rows // 20)
+                # Escalar el anillo: √(N/4) con mínimo 1× base_ring
+                ring_scale = max(1.0, np.sqrt(total / 4))
+                offset_r = int(base_ring * ring_scale)
+                offset_c = int(base_ring * ring_scale)
+                # Limitar al 10 % del grid para no salir de la zona útil
+                max_offset = min(self.env.grid.rows, self.env.grid.cols) // 10
+                offset_r = min(offset_r, max_offset)
+                offset_c = min(offset_c, max_offset)
                 start_r = int(np.clip(
                     center_row + int(offset_r * np.sin(angle)),
                     0, self.env.grid.rows - 1,
