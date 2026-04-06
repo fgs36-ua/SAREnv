@@ -112,6 +112,11 @@ class SwarmMetrics:
             "paths_lengths_m": {
                 a.id: a.get_path_linestring().length for a in self.sim.agents
             },
+            # Budget consumido (con coste de terreno) vs distancia geométrica
+            "budget_consumed_m": {
+                a.id: a.config.budget - a.budget_remaining
+                for a in self.sim.agents
+            },
         }
 
     # -- Helpers privados --

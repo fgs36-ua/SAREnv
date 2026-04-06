@@ -119,16 +119,20 @@ def run(args: argparse.Namespace) -> None:
     drones = [(aid, cells) for aid, cells in summary["per_agent_explored"].items() if aid.startswith("drone")]
     dogs   = [(aid, cells) for aid, cells in summary["per_agent_explored"].items() if aid.startswith("dog")]
 
+    budget_consumed = summary.get("budget_consumed_m", {})
+
     log.info("  --- Drones ---")
     for aid, cells in sorted(drones):
         length_m = summary["paths_lengths_m"].get(aid, 0)
-        log.info(f"    {aid}: {cells} celdas, path={length_m/1000:.1f} km")
+        budg_m = budget_consumed.get(aid, 0)
+        log.info(f"    {aid}: {cells} celdas, path={length_m/1000:.1f} km, budget={budg_m/1000:.1f} km")
 
     if dogs:
-        log.info("  --- Perros robot ---")
+        log.info("  --- Perros robot (path=distancia real, budget=con coste terreno) ---")
         for aid, cells in sorted(dogs):
             length_m = summary["paths_lengths_m"].get(aid, 0)
-            log.info(f"    {aid}: {cells} celdas, path={length_m/1000:.1f} km")
+            budg_m = budget_consumed.get(aid, 0)
+            log.info(f"    {aid}: {cells} celdas, path={length_m/1000:.1f} km, budget={budg_m/1000:.1f} km")
 
     drone_cells = sum(c for _, c in drones)
     dog_cells = sum(c for _, c in dogs)

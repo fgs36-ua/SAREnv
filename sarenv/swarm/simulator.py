@@ -132,7 +132,7 @@ class SwarmSimulator:
         # 2. DECISIÓN (simultánea -- ningún agente tiene ventaja secuencial)
         decisions: dict[str, tuple[int, int] | None] = {}
         for agent in active_agents:
-            decisions[agent.id] = agent.decide(perceptions[agent.id])
+            decisions[agent.id] = agent.decide(perceptions[agent.id], timestep=self.timestep)
 
         # 3. MOVE
         for agent in active_agents:

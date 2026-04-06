@@ -34,6 +34,7 @@ class Perception:
     neighbors: list[BaseSwarmAgent]
     budget_remaining: float
     position: tuple[int, int]
+    timestep: int = 0
 
 
 class BaseSwarmAgent:
@@ -123,7 +124,7 @@ class BaseSwarmAgent:
 
     # -- Decisión --
 
-    def decide(self, perception: Perception | None = None) -> tuple[int, int] | None:
+    def decide(self, perception: Perception | None = None, *, timestep: int = 0) -> tuple[int, int] | None:
         """Elige la siguiente celda. Cadena de 4 prioridades (ver docstring de clase)."""
         if not self.active:
             return None
@@ -157,6 +158,15 @@ class BaseSwarmAgent:
             prob = self.knowledge.probability_map[cell[0], cell[1]]
             novelty = 1.0 - self.knowledge.exploration_map[cell[0], cell[1]]
 
+            # Penalización por celdas que NOSOTROS ya visitamos (fuerte)
+            if cell in self.cells_ever_explored:
+                novelty *= 0.1
+            # Penalización por celdas que OTROS exploraron (caduca tras gossip_expiry_ticks)
+            elif cell in self.knowledge.cells_gossip_explored:
+                ts = self.knowledge.cells_gossip_explored[cell]
+                if (timestep - ts) < self.knowledge.gossip_expiry_ticks:
+                    novelty *= 0.3
+
             # Repulsión: penalizar celdas cerca de otros agentes
             repulsion = 0.0
             for npos in neighbor_positions:
@@ -168,6 +178,20 @@ class BaseSwarmAgent:
             if score > best_score:
                 best_score = score
                 best_cell = cell
+
+        # Prioridad 3b -- buscar frontera si estamos en zona ya explorada.
+        # Solo contar gossip no caducado como "conocido".
+        expiry = self.knowledge.gossip_expiry_ticks
+        active_gossip = {
+            c for c, ts in self.knowledge.cells_gossip_explored.items()
+            if (timestep - ts) < expiry
+        }
+        known = self.cells_ever_explored | active_gossip
+        all_visited = all(c in known for c in reachable)
+        if all_visited:
+            frontier = self._find_nearest_frontier(timestep=timestep)
+            if frontier is not None:
+                return self._step_toward(frontier)
 
         if best_cell is not None:
             return best_cell
@@ -208,6 +232,40 @@ class BaseSwarmAgent:
         """Elige un vecino alcanzable al azar."""
         idx = self._rng.integers(len(reachable))
         return reachable[idx]
+
+    def _find_nearest_frontier(self, max_scan: int = 40, *, timestep: int = 0) -> tuple[int, int] | None:
+        """BFS ligero para encontrar la celda inexplorada más cercana con prob > 0.
+
+        Expande en anillos de distancia Manhattan hasta *max_scan* celdas.
+        Devuelve None si no encuentra frontera (toda la zona explorada).
+        """
+        r0, c0 = self.position
+        rows, cols = self.env.grid.rows, self.env.grid.cols
+        prob = self.knowledge.probability_map
+        # Unión de celdas propias + gossip no caducado
+        expiry = self.knowledge.gossip_expiry_ticks
+        active_gossip = {
+            c for c, ts in self.knowledge.cells_gossip_explored.items()
+            if (timestep - ts) < expiry
+        }
+        known = self.cells_ever_explored | active_gossip
+
+        for ring in range(1, max_scan + 1):
+            best_prob = -1.0
+            best_cell = None
+            for dr in range(-ring, ring + 1):
+                for dc in range(-ring, ring + 1):
+                    if abs(dr) != ring and abs(dc) != ring:
+                        continue  # solo el perímetro del anillo
+                    nr, nc = r0 + dr, c0 + dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        if (nr, nc) not in known and prob[nr, nc] > 0:
+                            if prob[nr, nc] > best_prob:
+                                best_prob = prob[nr, nc]
+                                best_cell = (nr, nc)
+            if best_cell is not None:
+                return best_cell
+        return None
 
     def _detection_quality_at(self, row: int, col: int) -> float:
         """Calidad de detección base (sin modificar por terreno).

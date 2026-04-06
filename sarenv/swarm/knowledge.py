@@ -58,6 +58,12 @@ class LocalKnowledgeMap:
         # Feromona de alerta: 0.0 = nada, cuanto mayor, más interesante
         self.alert_map = np.zeros_like(self.probability_map, dtype=np.float32)
 
+        # Diccionario de celdas exploradas conocidas (propias + gossip).
+        # Mapea celda -> timestamp de última observación conocida.
+        # Caduca tras GOSSIP_EXPIRY_TICKS para permitir re-exploración a largo plazo.
+        self.cells_gossip_explored: Dict[Tuple[int, int], int] = {}
+        self.gossip_expiry_ticks: int = 15_000
+
         # Buffer de actualizaciones indexado por (row, col, layer)
         self._latest_updates: Dict[Tuple[int, int, str], MapUpdate] = {}
 
@@ -75,6 +81,7 @@ class LocalKnowledgeMap:
         Solo actualiza si la nueva calidad de detección supera la registrada.
         """
         for r, c in visible_cells:
+            self.cells_gossip_explored[(r, c)] = timestep
             effective = detection_quality
             if effective > self.exploration_map[r, c]:
                 self.exploration_map[r, c] = effective
@@ -134,6 +141,10 @@ class LocalKnowledgeMap:
             if existing is None or update.timestamp > existing.timestamp:
                 r, c = update.cell
                 if update.layer == "exploration":
+                    # Solo actualizar si el timestamp es más reciente
+                    prev_ts = self.cells_gossip_explored.get((r, c), -1)
+                    if update.timestamp > prev_ts:
+                        self.cells_gossip_explored[(r, c)] = update.timestamp
                     self.exploration_map[r, c] = max(
                         self.exploration_map[r, c], update.value
                     )
