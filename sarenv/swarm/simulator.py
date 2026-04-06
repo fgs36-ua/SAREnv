@@ -67,25 +67,25 @@ class SwarmSimulator:
         total = self.config.total_agents
         for i in range(total):
             # Despliegue en anillo alrededor del centro.
-            # Radio escala con √N para que la densidad local no crezca
-            # al añadir agentes (evita congestión inicial).
+            # Radio = min(dim) / 4 para maximizar la separación inicial,
+            # escalando con √N para enjambres grandes.
             if total > 1:
                 angle = 2 * np.pi * i / total
-                base_ring = min(2, self.env.grid.rows // 20)
-                # Escalar el anillo: √(N/4) con mínimo 1× base_ring
+                min_dim = min(self.env.grid.rows, self.env.grid.cols)
+                # Radio base: 1/4 de la dimensión menor del grid
+                base_ring = max(3, min_dim // 4)
+                # Escalar para enjambres grandes: √(N/4) con mínimo 1×
                 ring_scale = max(1.0, np.sqrt(total / 4))
-                offset_r = int(base_ring * ring_scale)
-                offset_c = int(base_ring * ring_scale)
-                # Limitar al 10 % del grid para no salir de la zona útil
-                max_offset = min(self.env.grid.rows, self.env.grid.cols) // 10
-                offset_r = min(offset_r, max_offset)
-                offset_c = min(offset_c, max_offset)
+                offset = int(base_ring * ring_scale)
+                # Limitar al 40 % del grid para no salir de la zona útil
+                max_offset = min_dim * 2 // 5
+                offset = min(offset, max_offset)
                 start_r = int(np.clip(
-                    center_row + int(offset_r * np.sin(angle)),
+                    center_row + int(offset * np.sin(angle)),
                     0, self.env.grid.rows - 1,
                 ))
                 start_c = int(np.clip(
-                    center_col + int(offset_c * np.cos(angle)),
+                    center_col + int(offset * np.cos(angle)),
                     0, self.env.grid.cols - 1,
                 ))
             else:
@@ -145,13 +145,16 @@ class SwarmSimulator:
 
         # 3. MOVE
         for agent in active_agents:
-            agent.execute_move(decisions[agent.id])
+            agent.execute_move(decisions[agent.id], timestep=self.timestep)
 
         # 4. OBSERVACIÓN -- actualizar conocimiento local con lo que vemos
         for agent in active_agents:
             if not agent.active:
                 continue
             visible = agent._get_visible_cells()
+            # Contar celdas nuevas ANTES de actualizar (para anti-estancamiento)
+            new_cells = len(visible - agent.cells_ever_explored)
+            agent._recent_new_cells.append(new_cells)
             # Acumular celdas observadas (inmune a evaporación, para métricas)
             agent.cells_ever_explored.update(visible)
             # Registrar cada celda con su calidad de detección específica

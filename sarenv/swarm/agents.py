@@ -83,6 +83,20 @@ class BaseSwarmAgent:
         self._frontier_target: tuple[int, int] | None = None
         self._frontier_ttl: int = 0  # ticks restantes de compromiso
 
+        # Timestamp de última visita propia a cada celda (para decaimiento
+        # temporal de la penalización de novelty)
+        self._visit_timestamps: dict[tuple[int, int], int] = {}
+        # Constante de decaimiento temporal (en ticks): a los ~200 ticks
+        # una celda visitada recupera ~63% de su novelty.
+        self._novelty_decay_tau: float = 200.0
+
+        # Anti-estancamiento: si en los últimos _stagnation_window pasos
+        # no descubrimos al menos _stagnation_threshold celdas nuevas,
+        # forzar búsqueda de frontera.
+        self._stagnation_window: int = 50       # ventana de ticks a mirar
+        self._stagnation_threshold: int = 5     # mínimo de celdas nuevas
+        self._recent_new_cells: list[int] = []  # historico de celdas nuevas/tick
+
         # Radio de detección cacheado desde config
         self._detection_radius: float = self._compute_detection_radius()
 
@@ -151,10 +165,41 @@ class BaseSwarmAgent:
         if perception.budget_remaining < estimated_return:
             return self._step_toward(self.base_position)
 
+        # Prioridad 1b -- compromiso de frontera activo
+        # Si el agente tiene un objetivo de frontera, seguir caminando
+        # hacia él hasta que expire el TTL o llegue.
+        if self._frontier_ttl > 0 and self._frontier_target is not None:
+            self._frontier_ttl -= 1
+            # Cancelar si hemos llegado (o estamos a 1 celda)
+            if self._grid_distance(self.position, self._frontier_target) < self.env.grid.dx * 1.5:
+                self._frontier_target = None
+                self._frontier_ttl = 0
+            else:
+                return self._step_toward(self._frontier_target)
+
+        # Prioridad 1c -- detector de estancamiento
+        # Si en los últimos _stagnation_window ticks no hemos descubierto
+        # suficientes celdas nuevas, forzar búsqueda de frontera.
+        if len(self._recent_new_cells) >= self._stagnation_window:
+            recent_sum = sum(self._recent_new_cells[-self._stagnation_window:])
+            if recent_sum < self._stagnation_threshold:
+                frontier = self._find_nearest_frontier(timestep=timestep)
+                if frontier is not None:
+                    dist_cells = max(
+                        abs(frontier[0] - self.position[0]),
+                        abs(frontier[1] - self.position[1]),
+                    )
+                    self._frontier_target = frontier
+                    self._frontier_ttl = dist_cells + 5
+                    return self._step_toward(frontier)
+
         # Prioridad 2 -- investigar la alerta más fuerte cercana
         if perception.local_alert:
             best_alert_cell = max(perception.local_alert, key=perception.local_alert.get)
             if perception.local_alert[best_alert_cell] > self.config.alert_threshold:
+                # Cancelar frontera si hay algo más urgente
+                self._frontier_target = None
+                self._frontier_ttl = 0
                 return self._step_toward(best_alert_cell)
 
         # Prioridad 3 -- exploración greedy con repulsión
@@ -172,9 +217,15 @@ class BaseSwarmAgent:
             prob = self.knowledge.probability_map[cell[0], cell[1]]
             novelty = 1.0 - self.knowledge.exploration_map[cell[0], cell[1]]
 
-            # Penalización por celdas que NOSOTROS ya visitamos (fuerte)
+            # Penalización por celdas que NOSOTROS ya visitamos: decaimiento
+            # temporal.  Recién visitada → novelty ≈ 0.05 (mínimo), pero
+            # recupera con e^(-Δt/tau) conforme pasa el tiempo.
             if cell in self.cells_ever_explored:
-                novelty *= 0.1
+                last_visit = self._visit_timestamps.get(cell, 0)
+                dt = max(timestep - last_visit, 0)
+                # Decaimiento: empieza en 0.05, sube hasta 1.0 con el tiempo
+                recovery = 1.0 - np.exp(-dt / self._novelty_decay_tau)
+                novelty *= max(0.05, recovery)
             # Penalización por celdas que OTROS exploraron (suave, caduca)
             elif cell in self.knowledge.cells_gossip_explored:
                 ts = self.knowledge.cells_gossip_explored[cell]
@@ -189,6 +240,12 @@ class BaseSwarmAgent:
                     repulsion += 1.0 / d
 
             score = prob * novelty - self.config.repulsion_weight * repulsion
+            # Bonus aditivo por exploración: premia celdas no visitadas
+            # con probabilidad > 0 para equilibrar explotación vs exploración.
+            # Solo aplica a celdas con prob > 0 para no gastar budget en
+            # zonas sin interés.
+            if cell not in self.cells_ever_explored and prob > 0:
+                score += self.config.exploration_weight
             # Jitter aleatorio para romper simetría entre agentes con
             # scoring casi idéntico (evita herding determinista)
             score += self._rng.random() * 1e-8
@@ -203,7 +260,25 @@ class BaseSwarmAgent:
         if all_own_visited:
             frontier = self._find_nearest_frontier(timestep=timestep)
             if frontier is not None:
+                # Comprometerse con la frontera: calcular TTL proporcional
+                # a la distancia (en celdas) para llegar.
+                dist_cells = max(
+                    abs(frontier[0] - self.position[0]),
+                    abs(frontier[1] - self.position[1]),
+                )
+                self._frontier_target = frontier
+                self._frontier_ttl = dist_cells + 5  # margen extra
                 return self._step_toward(frontier)
+            # Si no hay frontera (todo explorado), intentar Lévy flight
+            levy_target = self._levy_flight_target()
+            if levy_target is not None:
+                dist_cells = max(
+                    abs(levy_target[0] - self.position[0]),
+                    abs(levy_target[1] - self.position[1]),
+                )
+                self._frontier_target = levy_target
+                self._frontier_ttl = dist_cells + 3
+                return self._step_toward(levy_target)
 
         if best_cell is not None:
             return best_cell
@@ -213,7 +288,7 @@ class BaseSwarmAgent:
 
     # -- Ejecución --
 
-    def execute_move(self, target: tuple[int, int] | None) -> None:
+    def execute_move(self, target: tuple[int, int] | None, *, timestep: int = 0) -> None:
         """Mueve al agente a target consumiendo budget. Desactiva si se agota."""
         if target is None or not self.active:
             return
@@ -228,6 +303,8 @@ class BaseSwarmAgent:
         self.position = target
         self.budget_remaining -= cost
         self.path.append(target)
+        # Registrar timestamp de visita para decaimiento temporal
+        self._visit_timestamps[target] = timestep
 
     # -- Helpers --
 
@@ -248,6 +325,30 @@ class BaseSwarmAgent:
         """Elige un vecino alcanzable al azar."""
         idx = self._rng.integers(len(reachable))
         return reachable[idx]
+
+    def _levy_flight_target(self) -> tuple[int, int] | None:
+        """Genera un objetivo de salto largo con distribución de Lévy.
+
+        La distancia sigue una distribución de potencia (Pareto):
+        resultado entre 3 y 30 celdas con sesgo hacia distancias cortas.
+        Dirección aleatoria uniforme. Devuelve la celda más cercana
+        válida (dentro del grid y con prob > 0).
+        """
+        # Distancia con distribución de potencia: P(d) ~ d^(-1.5)
+        # Pareto con alpha=1.5, mínimo 3 celdas, cap 30
+        distance = min(30, int(3 * (self._rng.pareto(1.5) + 1)))
+        angle = self._rng.uniform(0, 2 * np.pi)
+        dr = int(round(distance * np.sin(angle)))
+        dc = int(round(distance * np.cos(angle)))
+        target_r = self.position[0] + dr
+        target_c = self.position[1] + dc
+        rows, cols = self.env.grid.rows, self.env.grid.cols
+        target_r = int(np.clip(target_r, 0, rows - 1))
+        target_c = int(np.clip(target_c, 0, cols - 1))
+        # Solo si la celda destino tiene probabilidad > 0
+        if self.knowledge.probability_map[target_r, target_c] > 0:
+            return (target_r, target_c)
+        return None
 
     def _find_nearest_frontier(self, max_scan: int = 100, *, timestep: int = 0) -> tuple[int, int] | None:
         """BFS ligero para encontrar la celda inexplorada más cercana con prob > 0.

@@ -23,6 +23,7 @@ class AgentConfig:
     budget: float = 100_000.0          # presupuesto de movimiento en metros
     comm_range: float = 500.0          # alcance radio para gossip (metros)
     repulsion_weight: float = 0.3      # peso de la repulsión entre agentes cercanos
+    exploration_weight: float = 0.001  # bonus aditivo para celdas no visitadas
     alert_threshold: float = 0.5       # intensidad mínima de alerta para investigar
     return_safety_factor: float = 1.2  # margen de seguridad para vuelta a base
 
