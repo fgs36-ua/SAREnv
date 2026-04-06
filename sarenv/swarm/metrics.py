@@ -3,13 +3,16 @@
 Adaptador que evalúa los resultados de la simulación de enjambre usando
 el PathEvaluator de sarenv.analytics.metrics, más métricas específicas
 del enjambre (cobertura, solapamiento, contribución por agente).
+
+Fase 4: métricas extendidas — tiempo hasta primera víctima, cobertura
+efectiva vs redundante, latencia de propagación de información.
 """
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -55,7 +58,7 @@ class SwarmMetrics:
         meters_per_bin = meters_per_bin or int(np.ceil(env.grid.dx))
 
         evaluator = PathEvaluator(
-            heatmap=env.probability_map,
+            heatmap=env.raw_heatmap,
             extent=env.bounds,
             victims=self._ensure_victims_gdf(),
             fov_deg=fov_deg,
@@ -90,11 +93,11 @@ class SwarmMetrics:
         sum_individual = sum(per_agent_explored.values())
         overlap = (sum_individual - total_explored) if sum_individual > 0 else 0
 
-        # Masa de probabilidad cubierta (sobre el heatmap original, sin normalizar)
+        # Masa de probabilidad cubierta (sobre el heatmap ORIGINAL, sin normalizar)
         prob_covered = 0.0
         for r, c in all_explored:
-            prob_covered += float(env.probability_map[r, c])
-        prob_total = float(np.sum(env.probability_map))
+            prob_covered += float(env.raw_heatmap[r, c])
+        prob_total = float(np.sum(env.raw_heatmap))
 
         return {
             "total_cells": total_cells,
@@ -118,6 +121,131 @@ class SwarmMetrics:
                 for a in self.sim.agents
             },
         }
+
+    # -- Métricas extendidas Fase 4 --
+
+    def time_to_first_victim(self) -> int | None:
+        """Tick en que algún agente detectó la primera víctima.
+
+        Calcula la distancia entre cada víctima y la posición de cada agente
+        en cada tick (usando el historial de posiciones). Se considera
+        detectada si la víctima cae dentro del radio de detección del agente.
+
+        Returns:
+            El tick (int) o None si no se detectó ninguna víctima.
+        """
+        import geopandas as gpd
+        victims_gdf = self._ensure_victims_gdf()
+        if victims_gdf.empty:
+            return None
+
+        env = self.sim.env
+        victim_cells: list[tuple[int, int]] = []
+        for geom in victims_gdf.geometry:
+            r, c = env.world_to_grid(geom.x, geom.y)
+            r = int(np.clip(r, 0, env.grid.rows - 1))
+            c = int(np.clip(c, 0, env.grid.cols - 1))
+            victim_cells.append((r, c))
+
+        victim_set = set(victim_cells)
+
+        # Recorrer el historial de posiciones (agent.path) de cada agente
+        # y comprobar si en algún tick cubre alguna víctima.
+        # Encontrar el tick más temprano entre todos los agentes.
+        earliest_tick = None
+        for agent in self.sim.agents:
+            radius_cells = max(1, int(agent.config.detection_radius / env.grid.dx))
+            for tick, pos in enumerate(agent.path):
+                r, c = pos
+                for dr in range(-radius_cells, radius_cells + 1):
+                    for dc in range(-radius_cells, radius_cells + 1):
+                        nr, nc = r + dr, c + dc
+                        if (nr, nc) in victim_set:
+                            if earliest_tick is None or tick < earliest_tick:
+                                earliest_tick = tick
+                            # No necesitamos seguir con este agente
+                            break
+                    else:
+                        continue
+                    break
+                else:
+                    continue
+                break  # ya encontramos el primer tick de este agente
+        return earliest_tick
+
+    def effective_vs_redundant_coverage(self) -> dict:
+        """Descompone la exploración total en cobertura efectiva (nueva)
+        y redundante (celdas ya visitadas por otro agente).
+
+        Returns:
+            dict con 'effective_cells', 'redundant_visits', 'efficiency_ratio'
+        """
+        all_explored: set[tuple[int, int]] = set()
+        total_visits = 0
+
+        for agent in self.sim.agents:
+            total_visits += len(agent.cells_ever_explored)
+            all_explored.update(agent.cells_ever_explored)
+
+        effective = len(all_explored)
+        redundant = total_visits - effective
+        efficiency = effective / total_visits if total_visits > 0 else 0
+
+        return {
+            "effective_cells": effective,
+            "redundant_visits": redundant,
+            "total_visits": total_visits,
+            "efficiency_ratio": efficiency,
+        }
+
+    def information_propagation_latency(self) -> float:
+        """Latencia media de propagación de información entre agentes.
+
+        Mide cuántos ticks tarda la información gossip en llegar de un agente
+        a otro, usando los timestamps de las celdas en cells_gossip_explored.
+        Compara el timestamp del gossip recibido con el timestamp actual de la
+        simulación para estimar el retraso medio.
+
+        Returns:
+            Latencia media en ticks (float). 0 si no hay datos gossip.
+        """
+        total_latency = 0
+        count = 0
+
+        for agent in self.sim.agents:
+            gossip = agent.knowledge.cells_gossip_explored
+            if not gossip:
+                continue
+            for _cell, timestamp in gossip.items():
+                # El timestamp guardado es cuándo se recibió; la info original
+                # fue generada antes. La diferencia con el tick final da una
+                # estimación pobre, así que usamos el spread: cuánto tardó
+                # en llegar respecto al momento en que se generó.
+                # Como aproximación: latency = sim.timestep - timestamp
+                latency = self.sim.timestep - timestamp
+                total_latency += latency
+                count += 1
+
+        return total_latency / count if count > 0 else 0.0
+
+    def full_report(self) -> dict:
+        """Informe completo combinando todas las métricas del enjambre.
+
+        Combina coverage_summary con las métricas extendidas de Fase 4
+        en un solo diccionario para facilitar la comparativa.
+        """
+        summary = self.coverage_summary()
+        eff = self.effective_vs_redundant_coverage()
+        ttfv = self.time_to_first_victim()
+        latency = self.information_propagation_latency()
+
+        summary["effective_cells"] = eff["effective_cells"]
+        summary["redundant_visits"] = eff["redundant_visits"]
+        summary["efficiency_ratio"] = eff["efficiency_ratio"]
+        summary["time_to_first_victim"] = ttfv
+        summary["info_propagation_latency"] = latency
+
+        return summary
 
     # -- Helpers privados --
 

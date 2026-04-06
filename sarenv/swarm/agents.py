@@ -74,6 +74,10 @@ class BaseSwarmAgent:
 
         self._rng = rng or np.random.default_rng()
 
+        # Frontier persistente: evita re-calcular cada tick y oscilar
+        self._frontier_target: tuple[int, int] | None = None
+        self._frontier_ttl: int = 0  # ticks restantes de compromiso
+
         # Radio de detección cacheado desde config
         self._detection_radius: float = self._compute_detection_radius()
 
@@ -161,11 +165,11 @@ class BaseSwarmAgent:
             # Penalización por celdas que NOSOTROS ya visitamos (fuerte)
             if cell in self.cells_ever_explored:
                 novelty *= 0.1
-            # Penalización por celdas que OTROS exploraron (caduca tras gossip_expiry_ticks)
+            # Penalización por celdas que OTROS exploraron (suave, caduca)
             elif cell in self.knowledge.cells_gossip_explored:
                 ts = self.knowledge.cells_gossip_explored[cell]
                 if (timestep - ts) < self.knowledge.gossip_expiry_ticks:
-                    novelty *= 0.3
+                    novelty *= 0.6
 
             # Repulsión: penalizar celdas cerca de otros agentes
             repulsion = 0.0
@@ -175,20 +179,18 @@ class BaseSwarmAgent:
                     repulsion += 1.0 / d
 
             score = prob * novelty - self.config.repulsion_weight * repulsion
+            # Jitter aleatorio para romper simetría entre agentes con
+            # scoring casi idéntico (evita herding determinista)
+            score += self._rng.random() * 1e-8
             if score > best_score:
                 best_score = score
                 best_cell = cell
 
-        # Prioridad 3b -- buscar frontera si estamos en zona ya explorada.
-        # Solo contar gossip no caducado como "conocido".
-        expiry = self.knowledge.gossip_expiry_ticks
-        active_gossip = {
-            c for c, ts in self.knowledge.cells_gossip_explored.items()
-            if (timestep - ts) < expiry
-        }
-        known = self.cells_ever_explored | active_gossip
-        all_visited = all(c in known for c in reachable)
-        if all_visited:
+        # Prioridad 3b -- buscar frontera si estamos en zona ya explorada
+        # por NOSOTROS MISMOS (no por gossip, que causaría convergencia
+        # de todos los drones al mismo punto frontera).
+        all_own_visited = all(c in self.cells_ever_explored for c in reachable)
+        if all_own_visited:
             frontier = self._find_nearest_frontier(timestep=timestep)
             if frontier is not None:
                 return self._step_toward(frontier)
@@ -233,7 +235,7 @@ class BaseSwarmAgent:
         idx = self._rng.integers(len(reachable))
         return reachable[idx]
 
-    def _find_nearest_frontier(self, max_scan: int = 40, *, timestep: int = 0) -> tuple[int, int] | None:
+    def _find_nearest_frontier(self, max_scan: int = 100, *, timestep: int = 0) -> tuple[int, int] | None:
         """BFS ligero para encontrar la celda inexplorada más cercana con prob > 0.
 
         Expande en anillos de distancia Manhattan hasta *max_scan* celdas.

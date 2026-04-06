@@ -186,6 +186,18 @@ class SwarmSimulator:
                     pairs.append((a, b))
         return pairs
 
+    def kill_agent(self, agent_id: str) -> bool:
+        """Desactiva un agente (simula fallo catastrófico en campo).
+
+        Returns True si se encontró y desactivó, False si no existe o ya
+        estaba inactivo.
+        """
+        for agent in self.agents:
+            if agent.id == agent_id and agent.active:
+                agent.active = False
+                return True
+        return False
+
     # -- Ejecución completa --
 
     def run(self, max_steps: int | None = None) -> list[dict]:

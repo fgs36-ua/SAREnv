@@ -24,6 +24,7 @@ from .environment import SwarmEnvironment
 from .knowledge import LocalKnowledgeMap, MapUpdate
 from .communication import CommunicationProtocol
 from .metrics import SwarmMetrics
+from .comparative import SwarmComparativeEvaluator
 from .terrain import (
     DETECTION_MODIFIERS,
     TRAVERSABILITY_COSTS,
@@ -45,6 +46,7 @@ __all__ = [
     "MapUpdate",
     "CommunicationProtocol",
     "SwarmMetrics",
+    "SwarmComparativeEvaluator",
     "DETECTION_MODIFIERS",
     "TRAVERSABILITY_COSTS",
     "build_detection_modifier_map",

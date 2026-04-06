@@ -48,7 +48,14 @@ class SwarmEnvironment:
 
     def __init__(self, dataset_item: SARDatasetItem) -> None:
         self.dataset_item = dataset_item
-        self.probability_map: np.ndarray = dataset_item.heatmap.astype(np.float32)
+        # Normalizar a [0, 1] para que el scoring no esté dominado por
+        # la escala absoluta del heatmap (cuyos valores son ~1e-5).
+        # Guardamos el heatmap original para PathEvaluator (métricas).
+        self.raw_heatmap: np.ndarray = dataset_item.heatmap.astype(np.float32)
+        pmax = self.raw_heatmap.max()
+        self.probability_map: np.ndarray = (
+            self.raw_heatmap / pmax if pmax > 0 else self.raw_heatmap.copy()
+        )
         self.bounds: tuple[float, float, float, float] = dataset_item.bounds
 
         rows, cols = self.probability_map.shape
